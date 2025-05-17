@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 tracking-agent = "tracking_agent:main"
+rag-ingest = "tracking_agent.ingestion.rag_corpus:main"
 
 [build-system]
 requires = ["hatchling"]

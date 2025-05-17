@@ -1,116 +1,42 @@
+import argparse
 import os
 from pathlib import Path
-from typing import Any, List
+from typing import Any
 
 import git
 import vertexai
 from google import genai
 from google.cloud import storage
 from google.genai.types import GenerateContentConfig, Retrieval, Tool, VertexRagStore
-from pydantic import Field
-from pydantic_settings import BaseSettings
 from vertexai import rag
 from vertexai.rag.rag_data import RagCorpus
 
+from tracking_agent.ingestion.config import RAGIngestConfig
 from tracking_agent.logger import structlog
 
 logger = structlog.get_logger()
+config = RAGIngestConfig()
 
 
-class RAGIngestConfig(BaseSettings):
-    github_url: str = Field(..., description="GitHub repository URL")
-    project_id: str = Field(..., description="GCP Project ID")
-    location: str = Field("us-central1", description="GCP Location")
-    bucket_name: str = Field(..., description="GCS Bucket Name")
-    gcs_folder_path: str = Field(
-        "rag-code-data", description="GCS folder path (prefix)"
-    )
-    max_file_size_mb: int = Field(
-        10, description="Maximum file size in MB to upload (0 for no limit)"
-    )
-    embedding_model: str = Field(
-        "publishers/google/models/text-embedding-005",
-        description="Embedding model name",
-    )
-    model_id: str = Field(
-        "gemini-2.5-flash-preview-04-17", description="Vertex model ID"
-    )
-    supported_extensions: List[str] = Field(
-        default_factory=lambda: [
-            ".py",
-            ".java",
-            ".js",
-            ".ts",
-            ".tsx",
-            ".go",
-            ".c",
-            ".cpp",
-            ".h",
-            ".hpp",
-            ".cs",
-            ".rb",
-            ".php",
-            ".swift",
-            ".kt",
-            ".scala",
-            ".md",
-            ".txt",
-            ".rst",
-            ".html",
-            ".css",
-            ".scss",
-            ".yaml",
-            ".yml",
-            ".json",
-            ".xml",
-            ".proto",
-            "Dockerfile",
-            ".sh",
-            ".tf",
-            ".tfvars",
-            ".bicep",
-            ".gradle",
-            "pom.xml",
-            "requirements.txt",
-            "package.json",
-            "go.mod",
-            "go.sum",
-            "Cargo.toml",
-        ],
-        description="Supported file extensions",
-    )
-    local_repo_path: str = Field(
-        "./cloned_repo", description="Local path to clone repo"
-    )
-    chunk_size: int = Field(500, description="Chunk size for RAG import")
-    chunk_overlap: int = Field(100, description="Chunk overlap for RAG import")
-    similarity_top_k: int = Field(10, description="Top K for similarity search")
-    vector_distance_threshold: float = Field(
-        0.5, description="Vector distance threshold"
-    )
-
-    class Config:
-        env_prefix = "RAG_"
-        case_sensitive = False
-
-
-def clone_github_repo(config: RAGIngestConfig) -> None:
-    repo_path = Path(config.local_repo_path)
+def clone_github_repo(github_url: str) -> Path:
+    # TODO: validate github_url
+    repo_path = Path(config.local_repo_path / github_url.split("/")[-1])
     if repo_path.exists():
         logger.info("Repo already cloned", path=str(repo_path))
         return  # Already cloned
-    logger.info("Cloning repo", github_url=config.github_url, path=str(repo_path))
+    logger.info("Cloning repo", github_url=github_url, path=str(repo_path))
     try:
-        git.Repo.clone_from(config.github_url, config.local_repo_path)
+        git.Repo.clone_from(github_url, config.local_repo_path)
         logger.info("Repo cloned successfully")
     except git.GitCommandError as e:
         logger.error("Error cloning repository", error=str(e))
         raise
+    return repo_path
 
 
-def get_gcs_bucket(config: RAGIngestConfig) -> storage.Bucket:
+def get_gcs_bucket() -> storage.Bucket:
     logger.info("Connecting to GCS bucket", bucket_name=config.bucket_name)
-    storage_client = storage.Client(project=config.project_id)
+    storage_client = storage.Client(project=config.google_config.project_id)
     try:
         bucket = storage_client.get_bucket(config.bucket_name)
         logger.info("Connected to bucket", bucket_name=bucket.name)
@@ -122,10 +48,10 @@ def get_gcs_bucket(config: RAGIngestConfig) -> storage.Bucket:
         raise
 
 
-def upload_repo_to_gcs(config: RAGIngestConfig, bucket: storage.Bucket) -> None:
+def upload_repo_to_gcs(bucket: storage.Bucket, local_repo_path: Path) -> None:
     logger.info(
         "Uploading repo files to GCS",
-        local_repo_path=config.local_repo_path,
+        local_repo_path=local_repo_path,
         bucket_name=config.bucket_name,
         gcs_folder_path=config.gcs_folder_path,
     )
@@ -134,7 +60,7 @@ def upload_repo_to_gcs(config: RAGIngestConfig, bucket: storage.Bucket) -> None:
     )
     uploaded = 0
     skipped = 0
-    for root, dirs, files in os.walk(config.local_repo_path):
+    for root, dirs, files in os.walk(local_repo_path):
         if ".git" in dirs:
             dirs.remove(".git")
         for file in files:
@@ -159,7 +85,7 @@ def upload_repo_to_gcs(config: RAGIngestConfig, bucket: storage.Bucket) -> None:
                         size=file_size_bytes,
                     )
                     continue
-            relative_path = os.path.relpath(local_file_path, config.local_repo_path)
+            relative_path = os.path.relpath(local_file_path, local_repo_path)
             gcs_blob_name = (
                 os.path.join(config.gcs_folder_path, relative_path)
                 if config.gcs_folder_path
@@ -185,11 +111,11 @@ def upload_repo_to_gcs(config: RAGIngestConfig, bucket: storage.Bucket) -> None:
     logger.info("Upload complete", uploaded=uploaded, skipped=skipped)
 
 
-def create_rag_corpus(config: RAGIngestConfig, rag_corpus_name: str) -> RagCorpus:
+def create_rag_corpus(rag_corpus_name: str, github_url: str) -> RagCorpus:
     logger.info("Creating RAG corpus", rag_corpus_name=rag_corpus_name)
     corpus = rag.create_corpus(
         display_name=rag_corpus_name,
-        description=f"RAG corpus from {config.github_url}",
+        description=f"RAG corpus from {github_url}",
         backend_config=rag.RagVectorDbConfig(
             rag_embedding_model_config=rag.RagEmbeddingModelConfig(
                 vertex_prediction_endpoint=rag.VertexPredictionEndpoint(
@@ -202,7 +128,7 @@ def create_rag_corpus(config: RAGIngestConfig, rag_corpus_name: str) -> RagCorpu
     return corpus
 
 
-def import_files_to_vertex_rag(config: RAGIngestConfig, rag_corpus_name: str) -> Any:
+def import_files_to_vertex_rag(rag_corpus_name: str) -> Any:
     logger.info(
         "Importing files from GCS to Vertex RAG corpus", rag_corpus_name=rag_corpus_name
     )
@@ -215,11 +141,11 @@ def import_files_to_vertex_rag(config: RAGIngestConfig, rag_corpus_name: str) ->
             )
         ),
     )
-    logger.info("Import to Vertex RAG started")
+    logger.info("Import to Vertex RAG completed", result=result)
     return result
 
 
-def create_rag_retrieval_tool(rag_corpus_name: str, config: RAGIngestConfig) -> Tool:
+def create_rag_retrieval_tool(rag_corpus_name: str) -> Tool:
     logger.info("Creating RAG retrieval tool", rag_corpus_name=rag_corpus_name)
     tool = Tool(
         retrieval=Retrieval(
@@ -234,13 +160,15 @@ def create_rag_retrieval_tool(rag_corpus_name: str, config: RAGIngestConfig) -> 
     return tool
 
 
-def generate_rag_response(
-    config: RAGIngestConfig, rag_retrieval_tool: Tool, prompt: str
-) -> Any:
+def generate_rag_response(rag_retrieval_tool: Tool, prompt: str) -> Any:
     logger.info("Generating RAG response for prompt", prompt=prompt)
-    vertexai.init(project=config.project_id, location=config.location)
+    vertexai.init(
+        project=config.google_config.project_id, location=config.google_config.location
+    )
     client = genai.Client(
-        vertexai=True, project=config.project_id, location=config.location
+        vertexai=True,
+        project=config.google_config.project_id,
+        location=config.google_config.location,
     )
     response = client.models.generate_content(
         model=config.model_id,
@@ -252,49 +180,36 @@ def generate_rag_response(
 
 
 def main():
-    # Example config (replace with your actual values or use environment variables)
+    argparser = argparse.ArgumentParser()
+    argparser.add_argument("github_url", type=str)
+    args = argparser.parse_args()
+
     logger.info("Starting RAG pipeline...")
-    config = RAGIngestConfig(
-        github_url="https://github.com/google/adk-python",
-        project_id="ahnopologetic",
-        location="us-central1",
-        bucket_name="tracking-agent",
-        gcs_folder_path="rag-code-data",
-        max_file_size_mb=10,
-        embedding_model="publishers/google/models/text-embedding-005",
-        model_id="gemini-2.5-flash-preview-04-17",
-        local_repo_path="./cloned_repo",
-    )
+    # config = RAGIngestConfig(
+    #     github_url="https://github.com/google/adk-python",
+    #     project_id="ahnopologetic",
+    #     location="us-central1",
+    #     bucket_name="tracking-agent",
+    #     gcs_folder_path="rag-code-data",
+    #     max_file_size_mb=10,
+    #     embedding_model="publishers/google/models/text-embedding-005",
+    #     model_id="gemini-2.5-flash-preview-04-17",
+    #     local_repo_path="./cloned_repo",
+    # )
 
-    # 1. Clone the GitHub repo
-    clone_github_repo(config)
-
+    local_repo_path = clone_github_repo(args.github_url)
     # 2. Get the GCS bucket
-    bucket = get_gcs_bucket(config)
+    bucket = get_gcs_bucket()
 
     # 3. Upload the repo to GCS
-    upload_repo_to_gcs(config, bucket)
+    upload_repo_to_gcs(bucket, local_repo_path)
 
-    # 4. Generate a unique corpus name
     import uuid
 
     rag_corpus_name = f"rag-corpus-code-{uuid.uuid4()}"
+    rag_corpus = create_rag_corpus(rag_corpus_name, args.github_url)
 
-    # 5. Create RAG corpus
-    rag_corpus = create_rag_corpus(config, rag_corpus_name)
-
-    # 6. Import files to Vertex RAG
-    import_files_to_vertex_rag(config, rag_corpus.name)
-
-    # 7. Create a RAG retrieval tool
-    rag_retrieval_tool = create_rag_retrieval_tool(rag_corpus.name, config)
-
-    # 8. Generate a sample RAG response
-    prompt = "What is the primary purpose or main functionality of this codebase?"
-    response = generate_rag_response(config, rag_retrieval_tool, prompt)
-
-    # 9. Print the response
-    logger.info("Final RAG response", response=str(response))
+    import_files_to_vertex_rag(rag_corpus.name)
 
 
 if __name__ == "__main__":

@@ -1,18 +1,11 @@
 from google.adk.agents import Agent
 from google.adk.tools.retrieval.vertex_ai_rag_retrieval import VertexAiRagRetrieval
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from vertexai.preview import rag
 
+from tracking_agent.config import AgentConfig
 from tracking_agent.prompts import return_instructions_root
 
-
-class AgentConfig(BaseSettings):
-    rag_corpus: str
-
-    model_config = SettingsConfigDict(env_file=".env")
-
-
-config = AgentConfig(rag_corpus="projects/1013401147098/locations/us-central1/ragCorpora/1152921504606846976")
+config = AgentConfig()
 
 ask_vertex_retrieval = VertexAiRagRetrieval(
     name="retrieve_rag_documentation",
@@ -29,7 +22,5 @@ root_agent = Agent(
     model="gemini-2.0-flash-001",
     name="ask_rag_agent",
     instruction=return_instructions_root(),
-    tools=[
-        ask_vertex_retrieval,
-    ],
+    tools=[ask_vertex_retrieval],
 )
