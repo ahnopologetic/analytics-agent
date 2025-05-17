@@ -2,6 +2,7 @@ import argparse
 import os
 from pathlib import Path
 from typing import Any
+import uuid
 
 import git
 import vertexai
@@ -111,11 +112,11 @@ def upload_repo_to_gcs(bucket: storage.Bucket, local_repo_path: Path) -> None:
     logger.info("Upload complete", uploaded=uploaded, skipped=skipped)
 
 
-def create_rag_corpus(rag_corpus_name: str, github_url: str) -> RagCorpus:
+def create_rag_corpus(rag_corpus_name: str, repo_org_and_name: str) -> RagCorpus:
     logger.info("Creating RAG corpus", rag_corpus_name=rag_corpus_name)
     corpus = rag.create_corpus(
         display_name=rag_corpus_name,
-        description=f"RAG corpus from {github_url}",
+        description=f"RAG corpus from {repo_org_and_name}",
         backend_config=rag.RagVectorDbConfig(
             rag_embedding_model_config=rag.RagEmbeddingModelConfig(
                 vertex_prediction_endpoint=rag.VertexPredictionEndpoint(
@@ -197,17 +198,14 @@ def main():
     #     local_repo_path="./cloned_repo",
     # )
 
+    repo_name = args.github_url.split("/")[-1]
+    repo_org_and_name = args.github_url.split("/")[-2:]
     local_repo_path = clone_github_repo(args.github_url)
-    # 2. Get the GCS bucket
     bucket = get_gcs_bucket()
-
-    # 3. Upload the repo to GCS
     upload_repo_to_gcs(bucket, local_repo_path)
 
-    import uuid
-
-    rag_corpus_name = f"rag-corpus-code-{uuid.uuid4()}"
-    rag_corpus = create_rag_corpus(rag_corpus_name, args.github_url)
+    rag_corpus_name = f"trk-rag-corpus-{repo_name}-{uuid.uuid4()}"
+    rag_corpus = create_rag_corpus(rag_corpus_name, repo_org_and_name)
 
     import_files_to_vertex_rag(rag_corpus.name)
 

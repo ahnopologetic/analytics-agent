@@ -12,9 +12,14 @@ class GoogleConfig(BaseSettings):
 
 
 class AgentConfig(BaseSettings):
-    rag_corpus: str
+    distance_threshold: float = Field(default=0.6)
+    top_k: int = Field(default=10)
+
     google_config: GoogleConfig = Field(default_factory=GoogleConfig)
 
     model_config = SettingsConfigDict(
         env_file=".env", env_prefix="TRK_AGENT_", extra="allow"
     )
+
+
+config = AgentConfig()
