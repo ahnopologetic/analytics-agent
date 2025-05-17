@@ -1,0 +1,21 @@
+# Tracking Agent
+- Goal
+	- Make Analytics Greater
+- Feature
+	- Tracking Plan Generation
+		- Configure and connect your github repos
+		- Scan through your repos, find existing event tracking including what event name and properties are tracking and its context (e.g., Triggers when user clicks submit button)
+		- Generate a table of tracking plan that includes name, properties, tags/categories, location, platform (e.g., web, app, server, etc)
+	- Tracking Plan Implementation
+		- Based on your generated or imported tracking plan, add analytics code to your repo. 
+	- Import Figma, auto generate tracking plan screen by screen
+- TODO
+	- Analyze seagoat
+		- How does it work? 
+		- How does it convert codebase to make it searchable? 
+	- Implementation Idea
+		- On top of cursor, IDEs
+			- VScode compatible extension? 
+- Idea/Scratchnote
+	- Now semantic code search is generally available. Can I just use it? 
+	- Or should I just implement RAG from codebase? 
