@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "code-splitter>=0.1.5",
+    "drtail-prompt",
     "gitpython>=3.1.44",
     "google-adk>=0.5.0",
     "google-cloud-aiplatform>=1.93.0",
@@ -25,3 +26,6 @@ rag-ingest = "tracking_agent.ingestion.rag_corpus:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.uv.sources]
+drtail-prompt = { git = "https://github.com/drtail/drtail-prompt.git", rev = "v0.3.0" }

@@ -8,7 +8,7 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-# 2. Configure structlog to use the standard library logger
+# 2. Configure structlog to use ConsoleRenderer with colors for console output
 structlog.configure(
     processors=[
         structlog.processors.TimeStamper(fmt="iso"),
@@ -16,7 +16,7 @@ structlog.configure(
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
-        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
+        structlog.dev.ConsoleRenderer(colors=True),
     ],
     context_class=dict,
     logger_factory=structlog.stdlib.LoggerFactory(),

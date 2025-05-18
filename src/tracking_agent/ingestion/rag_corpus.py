@@ -9,6 +9,9 @@ import vertexai
 from google import genai
 from google.cloud import storage
 from google.genai.types import GenerateContentConfig, Retrieval, Tool, VertexRagStore
+from google.cloud.aiplatform_v1.types.vertex_rag_data_service import (
+    ImportRagFilesResponse,
+)
 from vertexai import rag
 from vertexai.rag.rag_data import RagCorpus
 
@@ -21,14 +24,14 @@ config = RAGIngestConfig()
 
 def clone_github_repo(github_url: str) -> Path:
     # TODO: validate github_url
-    repo_path = Path(config.local_repo_path / github_url.split("/")[-1])
+    repo_path = Path(config.local_repo_path) / github_url.split("/")[-1]
     if repo_path.exists():
         logger.info("Repo already cloned", path=str(repo_path))
-        return  # Already cloned
+        return repo_path
     logger.info("Cloning repo", github_url=github_url, path=str(repo_path))
     try:
-        git.Repo.clone_from(github_url, config.local_repo_path)
-        logger.info("Repo cloned successfully")
+        git.Repo.clone_from(github_url, repo_path)
+        logger.info("Repo cloned successfully", path=str(repo_path))
     except git.GitCommandError as e:
         logger.error("Error cloning repository", error=str(e))
         raise
@@ -49,13 +52,15 @@ def get_gcs_bucket() -> storage.Bucket:
         raise
 
 
-def upload_repo_to_gcs(bucket: storage.Bucket, local_repo_path: Path) -> None:
+def upload_repo_to_gcs(bucket: storage.Bucket, local_repo_path: Path) -> str:
+    gcs_folder_prefix = config.gcs_folder_prefix + local_repo_path.name
     logger.info(
         "Uploading repo files to GCS",
         local_repo_path=local_repo_path,
         bucket_name=config.bucket_name,
-        gcs_folder_path=config.gcs_folder_path,
+        gcs_folder_prefix=gcs_folder_prefix,
     )
+
     max_bytes = (
         config.max_file_size_mb * 1024 * 1024 if config.max_file_size_mb > 0 else 0
     )
@@ -87,11 +92,7 @@ def upload_repo_to_gcs(bucket: storage.Bucket, local_repo_path: Path) -> None:
                     )
                     continue
             relative_path = os.path.relpath(local_file_path, local_repo_path)
-            gcs_blob_name = (
-                os.path.join(config.gcs_folder_path, relative_path)
-                if config.gcs_folder_path
-                else relative_path
-            )
+            gcs_blob_name = os.path.join(gcs_folder_prefix, relative_path)
             gcs_blob_name = gcs_blob_name.replace("\\", "/")
             blob = bucket.blob(gcs_blob_name)
             if blob.exists():
@@ -110,6 +111,7 @@ def upload_repo_to_gcs(bucket: storage.Bucket, local_repo_path: Path) -> None:
                     error=str(e),
                 )
     logger.info("Upload complete", uploaded=uploaded, skipped=skipped)
+    return gcs_folder_prefix
 
 
 def create_rag_corpus(rag_corpus_name: str, repo_org_and_name: str) -> RagCorpus:
@@ -129,13 +131,15 @@ def create_rag_corpus(rag_corpus_name: str, repo_org_and_name: str) -> RagCorpus
     return corpus
 
 
-def import_files_to_vertex_rag(rag_corpus_name: str) -> Any:
+def import_files_to_vertex_rag(
+    rag_corpus_name: str, gcs_folder_prefix: str
+) -> ImportRagFilesResponse:
     logger.info(
         "Importing files from GCS to Vertex RAG corpus", rag_corpus_name=rag_corpus_name
     )
     result = rag.import_files(
         corpus_name=rag_corpus_name,
-        paths=[f"gs://{config.bucket_name}/{config.gcs_folder_path}/"],
+        paths=[f"gs://{config.bucket_name}/{gcs_folder_prefix}/"],
         transformation_config=rag.TransformationConfig(
             chunking_config=rag.ChunkingConfig(
                 chunk_size=config.chunk_size, chunk_overlap=config.chunk_overlap
@@ -185,29 +189,18 @@ def main():
     argparser.add_argument("github_url", type=str)
     args = argparser.parse_args()
 
-    logger.info("Starting RAG pipeline...")
-    # config = RAGIngestConfig(
-    #     github_url="https://github.com/google/adk-python",
-    #     project_id="ahnopologetic",
-    #     location="us-central1",
-    #     bucket_name="tracking-agent",
-    #     gcs_folder_path="rag-code-data",
-    #     max_file_size_mb=10,
-    #     embedding_model="publishers/google/models/text-embedding-005",
-    #     model_id="gemini-2.5-flash-preview-04-17",
-    #     local_repo_path="./cloned_repo",
-    # )
+    logger.info("Starting RAG ingestion pipeline...")
 
     repo_name = args.github_url.split("/")[-1]
     repo_org_and_name = args.github_url.split("/")[-2:]
     local_repo_path = clone_github_repo(args.github_url)
     bucket = get_gcs_bucket()
-    upload_repo_to_gcs(bucket, local_repo_path)
+    gcs_folder_prefix = upload_repo_to_gcs(bucket, local_repo_path)
 
     rag_corpus_name = f"trk-rag-corpus-{repo_name}-{uuid.uuid4()}"
     rag_corpus = create_rag_corpus(rag_corpus_name, repo_org_and_name)
-
-    import_files_to_vertex_rag(rag_corpus.name)
+    result = import_files_to_vertex_rag(rag_corpus.name, gcs_folder_prefix)
+    logger.info("RAG corpus ingestion completed", result=result)
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ class RAGIngestConfig(BaseSettings):
     google_config: GoogleConfig = Field(default_factory=GoogleConfig)
 
     bucket_name: str = Field("tracking-agent", description="GCS Bucket Name")
-    gcs_folder_path: str = Field(
+    gcs_folder_prefix: str = Field(
         "rag-code-data", description="GCS folder path (prefix)"
     )
     max_file_size_mb: int = Field(
