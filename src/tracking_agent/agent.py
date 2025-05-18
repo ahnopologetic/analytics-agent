@@ -5,12 +5,16 @@ from pydantic import BaseModel
 from tracking_agent.tools import (
     add_corpus_from_github,
     add_corpus_from_local_path,
+    define_pattern,
     list_corpora,
     list_files,
     rag_query,
 )
+from pathlib import Path
 
-instruction = load_prompt("./tracking_agent/agent.prompt.yaml")
+ROOT_DIR = Path(__file__).parent.parent.parent
+AGENT_DIR = ROOT_DIR / "src" / "tracking_agent"
+instruction = load_prompt(AGENT_DIR / "agent.prompt.yaml")
 
 
 class TrackingAgentOutputItem(BaseModel):
@@ -34,5 +38,6 @@ root_agent = Agent(
         add_corpus_from_github,
         add_corpus_from_local_path,
         list_files,
+        define_pattern,
     ],
 )
