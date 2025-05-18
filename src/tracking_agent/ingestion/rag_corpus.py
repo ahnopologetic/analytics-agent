@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 from typing import Any
 import uuid
+import shutil
+import tempfile
 
 import git
 import vertexai
@@ -53,10 +55,33 @@ def get_gcs_bucket() -> storage.Bucket:
 
 
 def upload_repo_to_gcs(bucket: storage.Bucket, local_repo_path: Path) -> str:
+    """
+    Uploads supported files from a local repo to GCS. Non .md/.txt files are converted to .txt with original name preserved (e.g., main.js -> main.js.txt).
+    """
+
+    def is_supported_file(file_path: Path) -> bool:
+        file_lower = file_path.name.lower()
+        return (
+            any(file_lower.endswith(ext.lower()) for ext in config.supported_extensions)
+            or file_path.name in config.supported_extensions
+        )
+
+    def upload_file(blob, src_path: Path):
+        if blob.exists():
+            return False
+        blob.upload_from_filename(str(src_path))
+        return True
+
+    def convert_to_txt(src_path: Path) -> Path:
+        temp_dir = Path(tempfile.gettempdir())
+        temp_txt_path = temp_dir / f"{src_path.name}.txt"
+        shutil.copyfile(src_path, temp_txt_path)
+        return temp_txt_path
+
     gcs_folder_prefix = config.gcs_folder_prefix + local_repo_path.name
     logger.info(
         "Uploading repo files to GCS",
-        local_repo_path=local_repo_path,
+        local_repo_path=str(local_repo_path),
         bucket_name=config.bucket_name,
         gcs_folder_prefix=gcs_folder_prefix,
     )
@@ -64,52 +89,57 @@ def upload_repo_to_gcs(bucket: storage.Bucket, local_repo_path: Path) -> str:
     max_bytes = (
         config.max_file_size_mb * 1024 * 1024 if config.max_file_size_mb > 0 else 0
     )
-    uploaded = 0
-    skipped = 0
-    for root, dirs, files in os.walk(local_repo_path):
-        if ".git" in dirs:
-            dirs.remove(".git")
-        for file in files:
-            file_lower = file.lower()
-            local_file_path = os.path.join(root, file)
-            is_supported = (
-                any(
-                    file_lower.endswith(ext.lower())
-                    for ext in config.supported_extensions
-                )
-                or file in config.supported_extensions
+    uploaded, skipped = 0, 0
+
+    for file_path in Path(local_repo_path).rglob("*"):
+        if file_path.is_dir() or ".git" in file_path.parts:
+            continue
+        if not is_supported_file(file_path):
+            continue
+        if max_bytes > 0 and file_path.stat().st_size > max_bytes:
+            skipped += 1
+            logger.info(
+                "Skipping large file",
+                file=str(file_path),
+                size=file_path.stat().st_size,
             )
-            if not is_supported:
-                continue
-            if max_bytes > 0:
-                file_size_bytes = os.path.getsize(local_file_path)
-                if file_size_bytes > max_bytes:
-                    skipped += 1
-                    logger.info(
-                        "Skipping large file",
-                        file=local_file_path,
-                        size=file_size_bytes,
-                    )
-                    continue
-            relative_path = os.path.relpath(local_file_path, local_repo_path)
-            gcs_blob_name = os.path.join(gcs_folder_prefix, relative_path)
-            gcs_blob_name = gcs_blob_name.replace("\\", "/")
-            blob = bucket.blob(gcs_blob_name)
-            if blob.exists():
-                skipped += 1
-                continue
-            try:
-                blob.upload_from_filename(local_file_path)
+            continue
+
+        ext = file_path.suffix.lower()
+        needs_conversion = ext not in [".md", ".txt"]
+        upload_path = file_path
+        cleanup_temp = False
+
+        if needs_conversion:
+            upload_path = convert_to_txt(file_path)
+            # Place in GCS with .txt appended to original filename
+            rel_path = file_path.relative_to(local_repo_path).with_name(
+                file_path.name + ".txt"
+            )
+            cleanup_temp = True
+        else:
+            rel_path = file_path.relative_to(local_repo_path)
+
+        gcs_blob_name = str(Path(gcs_folder_prefix) / rel_path).replace("\\", "/")
+        blob = bucket.blob(gcs_blob_name)
+        try:
+            if upload_file(blob, upload_path):
                 uploaded += 1
                 if uploaded % 50 == 0:
                     logger.info("Uploaded files so far", uploaded=uploaded)
-            except Exception as e:
-                logger.error(
-                    "Error uploading file to GCS",
-                    file=local_file_path,
-                    gcs_path=f"gs://{config.bucket_name}/{gcs_blob_name}",
-                    error=str(e),
-                )
+            else:
+                skipped += 1
+        except Exception as e:
+            logger.error(
+                "Error uploading file to GCS",
+                file=str(file_path),
+                gcs_path=f"gs://{config.bucket_name}/{gcs_blob_name}",
+                error=str(e),
+            )
+        finally:
+            if cleanup_temp and upload_path.exists():
+                upload_path.unlink()
+
     logger.info("Upload complete", uploaded=uploaded, skipped=skipped)
     return gcs_folder_prefix
 

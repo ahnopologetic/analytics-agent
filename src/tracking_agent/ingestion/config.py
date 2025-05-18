@@ -9,7 +9,7 @@ class RAGIngestConfig(BaseSettings):
 
     bucket_name: str = Field("tracking-agent", description="GCS Bucket Name")
     gcs_folder_prefix: str = Field(
-        "rag-code-data", description="GCS folder path (prefix)"
+        "codes-", description="GCS folder path (prefix)"
     )
     max_file_size_mb: int = Field(
         10, description="Maximum file size in MB to upload (0 for no limit)"

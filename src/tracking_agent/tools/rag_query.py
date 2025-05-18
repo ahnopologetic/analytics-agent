@@ -2,6 +2,7 @@
 Tool for querying Vertex AI RAG corpora and retrieving relevant information.
 """
 
+from typing import Optional
 from google.adk.tools.tool_context import ToolContext
 from pydantic import BaseModel
 from vertexai import rag
@@ -34,6 +35,7 @@ def rag_query(
     corpus_name: str,
     query: str,
     tool_context: ToolContext,
+    file_names: Optional[list[str]] = None,
 ) -> dict:
     """
     Query a Vertex AI RAG corpus with a user question and return relevant information.
@@ -43,7 +45,7 @@ def rag_query(
                           Preferably use the resource_name from list_corpora results.
         query (str): The text query to search for in the corpus
         tool_context (ToolContext): The tool context
-
+        file_names (list[str]): The names of the files to query. If empty, all files in the corpus will be used.
     Returns:
         dict: The query results and status
     """
@@ -71,6 +73,7 @@ def rag_query(
             rag_resources=[
                 rag.RagResource(
                     rag_corpus=corpus_resource_name,
+                    rag_file_ids=file_names,
                 )
             ],
             text=query,
