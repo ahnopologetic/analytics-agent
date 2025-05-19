@@ -9,6 +9,7 @@ from vertexai import rag
 
 from tracking_agent.config import config
 from tracking_agent.logger import structlog
+from tracking_agent.retrieval.semantic_search_engine import VertexAISemanticSearch
 
 from .utils import check_corpus_exists, get_corpus_resource_name
 
@@ -129,3 +130,40 @@ def rag_query(
             results=[],
             results_count=0,
         ).model_dump(mode="json")
+
+
+def rag_query_with_semantic_search(
+    corpus_name: str,
+    query: str,
+    tool_context: ToolContext,
+    file_names: Optional[list[str]] = None,
+) -> dict:
+    """
+    Query a Vertex AI RAG corpus with a user question and return relevant information.
+    """
+    try:
+        # Check if the corpus exists
+        if not check_corpus_exists(corpus_name, tool_context):
+            return {
+                "status": "error",
+                "message": f"Corpus '{corpus_name}' does not exist. Please create it first using the create_corpus tool.",
+                "query": query,
+                "corpus_name": corpus_name,
+            }
+
+        # Get the corpus resource name
+        corpus_resource_name = get_corpus_resource_name(corpus_name)
+
+        semantic_search_engine = VertexAISemanticSearch(
+            corpus_resource_name,
+            config.google_config.project_id,
+            config.google_config.location,
+        )
+        results = semantic_search_engine.search(query, top_k=config.top_k)
+
+        return results
+
+    except Exception as e:
+        error_msg = f"Error querying corpus: {str(e)}"
+        logger.error(error_msg)
+        return []

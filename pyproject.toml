@@ -17,10 +17,18 @@ dependencies = [
     "google-genai>=1.15.0",
     "llama-index>=0.12.36",
     "structlog>=25.3.0",
+    "tree-sitter>=0.24.0",
+    "tree-sitter-go>=0.23.4",
+    "tree-sitter-java>=0.23.5",
+    "tree-sitter-javascript>=0.23.1",
+    "tree-sitter-kotlin>=1.1.0",
+    "tree-sitter-python>=0.23.6",
+    "tree-sitter-typescript>=0.23.2",
 ]
 
 [project.scripts]
 rag-ingest = "tracking_agent.ingestion.rag_corpus:main"
+rag-search = "tracking_agent.semantic_search_engine:main"
 
 [build-system]
 requires = ["hatchling"]

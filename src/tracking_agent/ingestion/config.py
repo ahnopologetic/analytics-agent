@@ -8,9 +8,7 @@ class RAGIngestConfig(BaseSettings):
     google_config: GoogleConfig = Field(default_factory=GoogleConfig)
 
     bucket_name: str = Field("tracking-agent", description="GCS Bucket Name")
-    gcs_folder_prefix: str = Field(
-        "codes-", description="GCS folder path (prefix)"
-    )
+    gcs_folder_prefix: str = Field("codes-", description="GCS folder path (prefix)")
     max_file_size_mb: int = Field(
         10, description="Maximum file size in MB to upload (0 for no limit)"
     )
@@ -26,6 +24,7 @@ class RAGIngestConfig(BaseSettings):
             ".py",
             ".java",
             ".js",
+            ".jsx",
             ".ts",
             ".tsx",
             ".go",
@@ -78,3 +77,6 @@ class RAGIngestConfig(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="TRK_INGEST_", case_sensitive=False, env_file=".env", extra="allow"
     )
+
+
+config = RAGIngestConfig()

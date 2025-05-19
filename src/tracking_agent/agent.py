@@ -4,13 +4,13 @@ from pydantic import BaseModel
 
 from tracking_agent.tools import (
     add_corpus_from_github,
-    add_corpus_from_local_path,
     define_pattern,
     list_corpora,
     list_files,
-    rag_query,
+    rag_query_with_semantic_search,
 )
 from pathlib import Path
+
 
 ROOT_DIR = Path(__file__).parent.parent.parent
 AGENT_DIR = ROOT_DIR / "src" / "tracking_agent"
@@ -34,9 +34,8 @@ root_agent = Agent(
     instruction=instruction.messages[0].content,
     tools=[
         list_corpora,
-        rag_query,
+        rag_query_with_semantic_search,
         add_corpus_from_github,
-        add_corpus_from_local_path,
         list_files,
         define_pattern,
     ],
